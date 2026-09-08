@@ -41,6 +41,7 @@ set(SOURCES
     widgets/screencombo.cpp widgets/screencombo.h
     widgets/tooltip.cpp widgets/tooltip.h
     widgets/videopreview.cpp widgets/videopreview.h
+    widgets/thumbnailclient.cpp widgets/thumbnailclient.h
 )
 
 qt_add_executable(mpc-qt WIN32 MACOSX_BUNDLE ${SOURCES})

@@ -1,15 +1,20 @@
 #include <QApplication>
 #include <QGraphicsDropShadowEffect>
+#include <QPixmap>
+#include <cmath>
 #include "videopreview.h"
 
 static constexpr char logModule[] =  "videopreview";
 static constexpr int previewMarginX = 20;
 static constexpr int labelHeight = 20;
 static constexpr int shadowMargin = 8;
+static constexpr int debounceMsec = 25;
+static constexpr int cacheLimit = 64;
+static constexpr double cacheBucketSec = 1.0;
 
 VideoPreview::VideoPreview(QWidget *parent) : QWidget(parent)
 {
-    mpv = new MpvObject(this);
+    client = new ThumbnailClient(this);
     videoContainer = new QWidget(parent);
     auto *shadow = new QGraphicsDropShadowEffect(videoContainer);
     shadow->setBlurRadius(40);
@@ -17,28 +22,27 @@ VideoPreview::VideoPreview(QWidget *parent) : QWidget(parent)
     shadow->setColor(QColor(0, 0, 0));
     videoContainer->setGraphicsEffect(shadow);
 
-    videoWidget = new MpvGlWidget(mpv, videoContainer);
-    mpv->setWidgetType(Helpers::CustomWidget, videoWidget);
+    videoWidget = new ThumbnailGlWidget(client->controller(), videoContainer);
+    imageLabel = new QLabel(videoContainer);
+    imageLabel->setAlignment(Qt::AlignCenter);
+    imageLabel->hide();
     textLabel = new QLabel(videoContainer);
     textLabel->setAlignment(Qt::AlignCenter);
 
     textLabel->setAutoFillBackground(true);
     updatePalette();
 
-    emit mpv->ctrlSetOptionVariant("vo", "libmpv");
-    emit mpv->ctrlSetOptionVariant("keep-open", true);
-    emit mpv->ctrlSetOptionVariant("sub-visibility", "no");
-    emit mpv->ctrlSetOptionVariant("hr-seek", "no");
-    emit mpv->ctrlSetOptionVariant("audio", "no");
-    emit mpv->ctrlSetOptionVariant("audio-display", "no");
-    emit mpv->ctrlSetOptionVariant("ytdl-format",
-        "bestvideo/best");
-    setYtdlRawOptions();
-    emit mpv->ctrlSetOptionVariant("clipboard-backends", "clr");
-    mpv->setPaused(true);
-
-    connect(mpv, &MpvObject::aspectChanged,
+    connect(client, &ThumbnailClient::aspectChanged,
             this, &VideoPreview::updateWidth);
+    connect(client, &ThumbnailClient::fileLoaded, this, [this]() {
+        videoWidget->setHasVideo(true);
+    });
+    connect(videoWidget, &QOpenGLWidget::frameSwapped,
+            this, &VideoPreview::onFrameSwapped);
+
+    debounce.setSingleShot(true);
+    debounce.setInterval(debounceMsec);
+    connect(&debounce, &QTimer::timeout, this, &VideoPreview::requestThumbnail);
 
     shouldBeShown = false;
     hide();
@@ -47,21 +51,27 @@ VideoPreview::VideoPreview(QWidget *parent) : QWidget(parent)
 
 VideoPreview::~VideoPreview()
 {
-    if (!mpv)
-        return;
-    mpv->setWidgetType(Helpers::NullWidget);
+    debounce.stop();
+    delete videoWidget;
     videoWidget = nullptr;
-    delete mpv;
-    mpv = nullptr;
+    delete client;
+    client = nullptr;
 }
 
 void VideoPreview::openFile(const QUrl &fileUrl)
 {
-    if (fileUrl.isEmpty())
+    if (fileUrl.isEmpty() || !client)
         return;
-    mpv->urlOpen(fileUrl);
+    if (videoWidget)
+        videoWidget->setHasVideo(false);
+    client->openUrl(fileUrl);
     aspectRatioSet = false;
     aspectRatio = 0;
+    cache.clear();
+    lastPixelHeight = 0;
+    lastSeekTime = -1;
+    grabPending = false;
+    imageLabel->hide();
 }
 
 void VideoPreview::updatePalette()
@@ -76,14 +86,27 @@ void VideoPreview::show(const QString &text, double videoPosition, const QPoint 
                         int mainWindowWidth, int previewHeight)
 {
     textLabel->setText(text);
-    if (previewHeight != videoWidget->height()) {
+    pendingTime = videoPosition;
+
+    int pixelHeight = qMax(2, int(std::round(previewHeight * devicePixelRatioF())));
+    if (pixelHeight != lastPixelHeight) {
+        lastPixelHeight = pixelHeight;
+        cache.clear();
         videoWidget->setFixedHeight(previewHeight);
-        updateWidth(aspectRatio);
+        setScaleFilter();
         setYtdlRawOptions();
+        updateWidth(aspectRatio);
     }
-    mpv->seek(videoPosition, false, true, true);
-    videoWidget->update();
+
     setPreviewPosition(where, mainWindowWidth);
+
+    if (CacheEntry *hit = findCache(videoPosition)) {
+        debounce.stop();
+        showCachedImage(hit->image);
+    } else {
+        showLiveVideo();
+        debounce.start();
+    }
     show();
 }
 
@@ -108,9 +131,11 @@ void VideoPreview::updateWidth(double newAspect)
     double dpr = devicePixelRatioF();
     int newWidth = floor(round(videoWidget->height() * dpr) * newAspect) / dpr;
     videoWidget->setFixedWidth(newWidth);
+    imageLabel->setFixedSize(newWidth, videoWidget->height());
     textLabel->setFixedSize(newWidth, labelHeight);
-    videoWidget->move(0, shadowMargin);
-    textLabel->move(0, shadowMargin + videoWidget->height());
+    videoWidget->move(shadowMargin, shadowMargin);
+    imageLabel->move(shadowMargin, shadowMargin);
+    textLabel->move(shadowMargin, shadowMargin + videoWidget->height());
     videoContainer->setFixedSize(newWidth + shadowMargin * 2,
                                  videoWidget->height() + labelHeight + shadowMargin * 2);
     aspectRatioSet = true;
@@ -122,9 +147,95 @@ void VideoPreview::updateWidth(double newAspect)
 
 void VideoPreview::setYtdlRawOptions()
 {
-    emit mpv->ctrlSetOptionVariant("ytdl-raw-options", QString("js-runtimes=quickjs,"\
-                                                    "remote-components=ejs:github,"\
-                                                    "format-sort=[res:%1,+size,+br,+fps]").arg(videoWidget->height()));
+    if (!client || !videoWidget)
+        return;
+    client->setOption("ytdl-raw-options", QString("js-runtimes=quickjs,"\
+                                        "remote-components=ejs:github,"\
+                                        "format-sort=[res:%1,+size,+br,+fps]").arg(videoWidget->height()));
+}
+
+void VideoPreview::setScaleFilter()
+{
+    if (!client || lastPixelHeight <= 0)
+        return;
+    int evenHeight = qMax(2, (lastPixelHeight / 2) * 2);
+    client->setOption("vf", QString("scale=-2:%1").arg(evenHeight));
+}
+
+void VideoPreview::requestThumbnail()
+{
+    if (CacheEntry *hit = findCache(pendingTime)) {
+        showCachedImage(hit->image);
+        return;
+    }
+    if (lastSeekTime >= 0 && timeBucket(pendingTime) == timeBucket(lastSeekTime))
+        return;
+    if (!client)
+        return;
+    lastSeekTime = pendingTime;
+    grabPending = true;
+    showLiveVideo();
+    client->seek(pendingTime);
+    videoWidget->update();
+}
+
+void VideoPreview::onFrameSwapped()
+{
+    if (!grabPending || !videoWidget)
+        return;
+    QImage image = videoWidget->grabFramebuffer();
+    if (image.isNull() || image.width() < 2 || image.height() < 2)
+        return;
+    grabPending = false;
+    storeCache(lastSeekTime, image);
+}
+
+void VideoPreview::showCachedImage(const QImage &image)
+{
+    if (image.isNull())
+        return;
+    double dpr = devicePixelRatioF();
+    QPixmap pm = QPixmap::fromImage(image);
+    pm.setDevicePixelRatio(dpr);
+    imageLabel->setPixmap(pm);
+    imageLabel->setFixedSize(videoWidget->width(), videoWidget->height());
+    imageLabel->show();
+    imageLabel->raise();
+}
+
+void VideoPreview::showLiveVideo()
+{
+    imageLabel->hide();
+}
+
+qint64 VideoPreview::timeBucket(double time)
+{
+    return qint64(std::llround(time / cacheBucketSec));
+}
+
+VideoPreview::CacheEntry *VideoPreview::findCache(double time)
+{
+    qint64 bucket = timeBucket(time);
+    for (CacheEntry &entry : cache) {
+        if (entry.bucket == bucket)
+            return &entry;
+    }
+    return nullptr;
+}
+
+void VideoPreview::storeCache(double requestedTime, const QImage &image)
+{
+    qint64 bucket = timeBucket(requestedTime);
+    for (int i = 0; i < cache.size(); i++) {
+        if (cache[i].bucket == bucket) {
+            cache[i].image = image;
+            cache.move(i, 0);
+            return;
+        }
+    }
+    cache.prepend({bucket, image});
+    while (cache.size() > cacheLimit)
+        cache.removeLast();
 }
 
 void VideoPreview::show()
@@ -133,11 +244,13 @@ void VideoPreview::show()
         shouldBeShown = true;
         return;
     }
+    shouldBeShown = true;
     videoContainer->move(previewBottomLeft.x(),
                          previewBottomLeft.y() - videoContainer->height());
 }
 
 void VideoPreview::hide() {
     shouldBeShown = false;
+    debounce.stop();
     videoContainer->move(-50000, -50000);
 }
