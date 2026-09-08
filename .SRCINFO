@@ -1,0 +1,31 @@
+pkgbase = mpc-qt-custom-git
+	pkgdesc = Media Player Classic reimplemented with Qt and libmpv, with custom feature branches
+	pkgver = 0
+	pkgrel = 1
+	url = https://github.com/jimzrt/mpc-qt
+	arch = x86_64
+	license = GPL-2.0-or-later
+	makedepends = boost
+	makedepends = cmake
+	makedepends = git
+	makedepends = ninja
+	makedepends = qt6-tools
+	depends = mpv
+	depends = qt6-base
+	depends = qt6-svg
+	provides = mpc-qt
+	conflicts = mpc-qt
+	conflicts = mpc-qt-git
+	replaces = mpc-qt
+	replaces = mpc-qt-git
+	options = !debug
+	source = mpc-qt::git+https://github.com/jimzrt/mpc-qt.git#branch=master
+	source = feature-thumbnail::git+https://github.com/jimzrt/mpc-qt.git#branch=feature/thumbnail
+	source = feature-dialogue-fix::git+https://github.com/jimzrt/mpc-qt.git#branch=feature/dialogue-fix
+	source = feature-hold-to-speed::git+https://github.com/jimzrt/mpc-qt.git#branch=feature/hold-to-speed
+	b2sums = SKIP
+	b2sums = SKIP
+	b2sums = SKIP
+	b2sums = SKIP
+
+pkgname = mpc-qt-custom-git
