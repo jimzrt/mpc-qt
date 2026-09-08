@@ -24,13 +24,19 @@ prepare() {
     cd "$srcdir/mpc-qt"
 
     git fetch --no-tags "$srcdir/feature-thumbnail" HEAD
-    git merge --no-edit --no-ff FETCH_HEAD -m 'Merge feature/thumbnail'
+    git -c user.name='mpc-qt makepkg' \
+        -c user.email='mpc-qt-makepkg@localhost' \
+        merge --no-edit --no-ff FETCH_HEAD -m 'Merge feature/thumbnail'
 
     git fetch --no-tags "$srcdir/feature-dialogue-fix" HEAD
-    git merge --no-edit --no-ff FETCH_HEAD -m 'Merge feature/dialogue-fix'
+    git -c user.name='mpc-qt makepkg' \
+        -c user.email='mpc-qt-makepkg@localhost' \
+        merge --no-edit --no-ff FETCH_HEAD -m 'Merge feature/dialogue-fix'
 
     git fetch --no-tags "$srcdir/feature-hold-to-speed" HEAD
-    git merge --no-edit --no-ff FETCH_HEAD -m 'Merge feature/hold-to-speed'
+    git -c user.name='mpc-qt makepkg' \
+        -c user.email='mpc-qt-makepkg@localhost' \
+        merge --no-edit --no-ff FETCH_HEAD -m 'Merge feature/hold-to-speed'
 }
 
 pkgver() {
