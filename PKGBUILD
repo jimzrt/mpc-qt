@@ -1,5 +1,5 @@
 pkgname=mpc-qt-custom-git
-pkgver=0
+pkgver=26.07.master.200.g7d5e4311
 pkgrel=1
 pkgdesc='Media Player Classic reimplemented with Qt and libmpv, with custom feature branches'
 arch=('x86_64')
