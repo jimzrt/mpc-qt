@@ -820,6 +820,8 @@ void Flow::setupSettingsConnections()
             settingsWindow, &SettingsWindow::setZoomPreset);
     connect(mainWindow, &MainWindow::audioFilter,
             settingsWindow, &SettingsWindow::setAudioFilter);
+    connect(mainWindow, &MainWindow::dialogueDownmix,
+            settingsWindow, &SettingsWindow::setDialogueDownmix);
     connect(mainWindow, &MainWindow::videoFilter,
             settingsWindow, &SettingsWindow::setVideoFilter);
 
@@ -970,6 +972,8 @@ void Flow::setupMpvObjectConnections()
             settingsWindow, &SettingsWindow::setAudioDevices);
 
     // mpvwidget -> properties
+    connect(mpvObject, &MpvObject::audioChannelCountChanged,
+            settingsWindow, &SettingsWindow::setAudioSourceChannels);
     connect(mpvObject, &MpvObject::fileNameChanged,
             propertiesWindow, &PropertiesWindow::setFileName);
     connect(mpvObject, &MpvObject::fileFormatChanged,

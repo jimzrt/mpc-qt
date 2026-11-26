@@ -150,6 +150,7 @@ signals:
     void displayFramedropsChanged(int64_t count);
     void decoderFramedropsChanged(int64_t cout);
     void audioBitrateChanged(double bitrate);
+    void audioChannelCountChanged(int64_t count);
     void videoBitrateChanged(double bitrate);
     void interlacedChanged(bool yes);
     void aspectChanged(double newAspect);

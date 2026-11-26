@@ -190,6 +190,7 @@ QVariantMap MainWindow::state()
         { WRAP(ui->actionAudioFilterExtrastereo) },
         { WRAP(ui->actionAudioFilterAcompressor) },
         { WRAP(ui->actionAudioFilterCrossfeed) },
+        { WRAP(ui->actionAudioFilterDialogueDownmix) },
         { WRAP(ui->actionPlaySubtitlesEnabled) },
         { WRAP(ui->actionDisableVideoAspect) },
         { WRAP(ui->actionPlayVolumeMute) },
@@ -230,6 +231,7 @@ void MainWindow::setState(const QVariantMap &map)
     UNWRAP(ui->actionAudioFilterExtrastereo, false);
     UNWRAP(ui->actionAudioFilterAcompressor, false);
     UNWRAP(ui->actionAudioFilterCrossfeed, false);
+    UNWRAP(ui->actionAudioFilterDialogueDownmix, false);
     UNWRAP(ui->actionPlaySubtitlesEnabled, true);
     UNWRAP(ui->actionDisableVideoAspect, false);
     UNWRAP(ui->actionPlayVolumeMute, false);
@@ -237,6 +239,7 @@ void MainWindow::setState(const QVariantMap &map)
     ui->actionAudioFilterExtrastereo->isChecked() ? on_actionAudioFilterExtrastereo_triggered(true) : qt_noop();
     ui->actionAudioFilterAcompressor->isChecked() ? on_actionAudioFilterAcompressor_triggered(true) : qt_noop();
     ui->actionAudioFilterCrossfeed->isChecked() ? on_actionAudioFilterCrossfeed_triggered(true) : qt_noop();
+    ui->actionAudioFilterDialogueDownmix->isChecked() ? on_actionAudioFilterDialogueDownmix_triggered(true) : qt_noop();
     setSubtitlesEnabled(ui->actionPlaySubtitlesEnabled->isChecked(), true);
     setVolumeMuteState(ui->actionPlayVolumeMute->isChecked(), true);
     setVolume(map.value("volume", 100).toInt(), true);
@@ -3463,6 +3466,11 @@ void MainWindow::on_actionAudioFilterAcompressor_triggered(bool checked)
 void MainWindow::on_actionAudioFilterCrossfeed_triggered(bool checked)
 {
     emit audioFilter("bs2b", "profile=cmoy", checked);
+}
+
+void MainWindow::on_actionAudioFilterDialogueDownmix_triggered(bool checked)
+{
+    emit dialogueDownmix(checked);
 }
 
 void MainWindow::on_actionVideoFiltersDeinterlaceYes_triggered()

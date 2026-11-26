@@ -198,6 +198,7 @@ signals:
     void fullscreenHideControls(bool checked);
     void repeatAfter();
     void audioFilter(QString filter, QString options, bool add);
+    void dialogueDownmix(bool enabled);
     void videoFilter(QString filter, QString options, bool add);
 
 public slots:
@@ -438,6 +439,7 @@ private slots:
     void on_actionAudioFilterExtrastereo_triggered(bool checked);
     void on_actionAudioFilterAcompressor_triggered(bool checked);
     void on_actionAudioFilterCrossfeed_triggered(bool checked);
+    void on_actionAudioFilterDialogueDownmix_triggered(bool checked);
 
     void on_actionVideoFiltersDeinterlaceYes_triggered();
     void on_actionVideoFiltersDeinterlaceAuto_triggered();

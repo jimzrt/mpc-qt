@@ -14,6 +14,34 @@
 #include "ui_settingswindow.h"
 #include "widgets/screencombo.h"
 
+// Dialogue clarity for surround sources, downmixed to stereo.
+// The center channel (dialogue) and the rest (effects, music) are processed
+// separately before they are mixed, so loud effects can't turn the voices down:
+// - voice: 5:1 compressor with up to +15.6 dB makeup and a slow release. This is
+//   the gain curve of Windows' Loudness Equalization, whose target gain is
+//   (1300/L)^1.6 with L ~ energy^0.25, i.e. gain ~ level^-0.8, a 5:1 ratio.
+// - bed: fronts, surrounds, backs, heights and LFE (low, as standard stereo
+//   downmixes drop it), folded into stereo, then
+//   3:1 compressed and ducked by about 3 dB while the voice is active.
+// - a look-ahead limiter after the mix.
+// Channels missing from the source are ignored by pan.
+static const char dialogueClarityGraph[] =
+    "asplit=2[a][b];"
+    "[a]pan=mono|c0=FC,"
+    "acompressor=threshold=0.02:ratio=5:attack=10:release=1500:makeup=6,"
+    "asplit=2[v][k];"
+    "[v]pan=stereo|c0=c0|c1=c0[vs];"
+    "[b]pan=stereo|"
+    "FL=0.71*FL+0.50*FLC+0.10*LFE+0.50*SL+0.50*BL+0.35*BC+0.35*TFL+0.35*TBL|"
+    "FR=0.71*FR+0.50*FRC+0.10*LFE+0.50*SR+0.50*BR+0.35*BC+0.35*TFR+0.35*TBR,"
+    "acompressor=threshold=0.1:ratio=3:attack=10:release=1000[bd];"
+    "[bd][k]sidechaincompress=threshold=0.03:ratio=2:attack=20:release=600[dk];"
+    "[vs][dk]amix=inputs=2:normalize=0,"
+    "alimiter=limit=0.95:level=0:latency=1";
+static const QString dialogueClarityFilter = "@dialogue:lavfi";
+// Sources with fewer channels have no discrete center channel to work with.
+static constexpr int64_t dialogueClarityMinChannels = 5;
+
 // No designated initializers until c++2a, so use factory method instead
 struct FilterWindow {
     //QString name;
@@ -1011,8 +1039,9 @@ void SettingsWindow::sendSignals()
     int index = WIDGET_LOOKUP(ui->audioDevice).toInt();
     emit option("audio-device", audioDevices.value(index).deviceName());
     index = WIDGET_LOOKUP(ui->audioChannels).toInt();
-    emit option("audio-channels", index < 4 ? SettingMap::indexedValueToText[ui->audioChannels->objectName()][index]
-                                         : channelSwitcher());
+    QString audioChannels = index < 4 ? SettingMap::indexedValueToText[ui->audioChannels->objectName()][index]
+                                      : channelSwitcher();
+    emit option("audio-channels", dialogueDownmixActive ? QVariant("stereo") : QVariant(audioChannels));
     bool flag = WIDGET_LOOKUP(ui->audioStreamSilence).toBool();
     emit option("audio-stream-silence", flag);
     emit option("audio-wait-open", flag ? WIDGET_LOOKUP(ui->audioWaitTime).toDouble() : 0.0);
@@ -1223,6 +1252,47 @@ void SettingsWindow::setAudioFilter(QString filter, QString options, bool add)
 {
     bool clearFilters = setFilter(audioFiltersList, filter, options, add);
     emit audioFilters(audioFiltersList, clearFilters);
+}
+
+void SettingsWindow::setDialogueDownmix(bool enabled)
+{
+    dialogueDownmixActive = enabled;
+    updateDialogueFilter();
+
+    int index = WIDGET_LOOKUP(ui->audioChannels).toInt();
+    QString audioChannels = index < 4 ? SettingMap::indexedValueToText[ui->audioChannels->objectName()][index]
+                                      : channelSwitcher();
+    emit option("audio-channels", enabled ? QVariant("stereo") : QVariant(audioChannels));
+}
+
+void SettingsWindow::setAudioSourceChannels(int64_t count)
+{
+    // 0 while no audio is loaded, e.g. between files: keep the current state
+    if (count <= 0 || count == audioSourceChannels)
+        return;
+    audioSourceChannels = count;
+    updateDialogueFilter();
+}
+
+void SettingsWindow::updateDialogueFilter()
+{
+    bool apply = dialogueDownmixActive && audioSourceChannels >= dialogueClarityMinChannels;
+    auto it = std::find_if(audioFiltersList.begin(), audioFiltersList.end(),
+                           [](const QPair<QString, QString> &pair) {
+        return pair.first == dialogueClarityFilter;
+    });
+    bool found = it != audioFiltersList.end();
+    if (found == apply)
+        return;
+    if (found)
+        audioFiltersList.erase(it);
+    else
+        // First, so that it gets all channels before other filters see them.
+        // %n% is mpv's length-prefixed quoting, the graph has ',' '[' and ']'.
+        audioFiltersList.prepend({ dialogueClarityFilter,
+                                   '%' + QString::number(qstrlen(dialogueClarityGraph)) + '%'
+                                       + dialogueClarityGraph });
+    emit audioFilters(audioFiltersList, found);
 }
 
 void SettingsWindow::setVideoFilter(QString filter, QString options, bool add)
